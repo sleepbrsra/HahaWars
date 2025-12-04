@@ -4,10 +4,13 @@ from PIL import Image, ImageTk
 import shutil
 import os
 import json
-from game_logic import Game
+
+from modules.game_logic import Player
+
 
 from modules.server import RoomServer
 from modules.client import RoomClient
+
 
 import io
 import base64
@@ -19,6 +22,10 @@ ACCENT_COLOR = "#9a4dff"
 USER_BG = "#2e2e3e"
 AVATARS_DIR = "avatars"
 USER_DATA_FILE = "user_data.json"
+#-----
+table_frame = None
+table_cards_widgets = []
+
 
 # ---------------- Работа с JSON ----------------
 def load_user_data():
@@ -48,6 +55,7 @@ def start_hub(user_data, network=None):
     is_host = False
 
     players_imgs = []
+
     # ---------------- GUI ----------------
     root = tk.Tk()
     root.title("HahaWars HUB")
@@ -106,6 +114,46 @@ def start_hub(user_data, network=None):
     game_frame = tk.Frame(main_frame, bg=BG_COLOR)
     game_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
 
+# ----------- ДОБАВЛЯЕМ СИНХРОНИЗИРОВАННЫЙ СТОЛ -----------
+
+
+    def init_table_frame():
+        global table_frame
+        # Если фрейм не создан или уничтожен, создаём заново
+        if table_frame is None or not table_frame.winfo_exists():
+            table_frame = tk.Frame(game_frame, bg=BG_COLOR)
+            table_frame.pack(pady=20)
+
+
+    def add_card_to_table(player_name, card_path):
+        global table_cards_widgets
+
+        def _add():
+            init_table_frame()  # убеждаемся, что фрейм есть
+            try:
+                img = Image.open(card_path).resize((120, 180))
+                photo = ImageTk.PhotoImage(img)
+                lbl = tk.Label(table_frame, image=photo, bg=BG_COLOR)
+                lbl.image = photo
+            except Exception:
+                # если не получилось загрузить изображение, просто текст
+                lbl = tk.Label(table_frame, text=f"{player_name}: {card_path}", bg=BG_COLOR, fg=FG_COLOR)
+
+            # Показываем карту в линии слева направо
+            lbl.pack(side="left", padx=5)
+            table_cards_widgets.append(lbl)
+
+        # Вызываем через after, чтобы работало из другого потока
+        game_frame.after(0, _add)
+
+    def clear_table():
+        global table_cards_widgets, table_frame
+        if table_frame and table_frame.winfo_exists():
+            for w in table_cards_widgets:
+                w.destroy()
+            table_cards_widgets.clear()
+
+
     # ---------------- Редактор профиля ----------------
     def open_profile_editor():
         editor = tk.Toplevel(root)
@@ -158,6 +206,7 @@ def start_hub(user_data, network=None):
         tk.Button(editor, text="Сохранить", command=save_profile, bg=ACCENT_COLOR, fg=FG_COLOR).pack(pady=10)
 
     # ---------------- HUB Логика ----------------
+    # ---------------- HUB Логика ----------------
     def show_idle():
         for w in left_frame.winfo_children():
             w.destroy()
@@ -167,15 +216,41 @@ def start_hub(user_data, network=None):
         tk.Button(left_frame, text="Присоединиться к комнате", command=join_room, bg=ACCENT_COLOR, fg=FG_COLOR, font=("Arial", 14)).pack(pady=10)
         tk.Button(left_frame, text="Редактировать профиль", command=open_profile_editor, bg=ACCENT_COLOR, fg=FG_COLOR, font=("Arial", 14)).pack(pady=10)
 
+        # Очистка игровой зоны
         for w in game_frame.winfo_children():
             w.destroy()
         tk.Label(game_frame, text="Игровая зона недоступна\nВы не в комнате", bg=BG_COLOR, fg=FG_COLOR, font=("Arial", 16)).pack(pady=50)
 
     def start_game():
-        tk.messagebox.showinfo("Игра", "Игра начинается! (здесь будет запуск Game)")
-        # Здесь можно добавить интеграцию с game_logic:
-        # game_obj = Game(players=network['room']['players'])
-        # game_obj.start()
+        """
+        Запускаем игру и раздаём карты всем игрокам.
+        """
+        import random
+        from modules.data_loader import load_cards, load_situations
+
+        ALL_CARDS = load_cards()
+        ALL_SITUATIONS = load_situations()
+        situation = random.choice(ALL_SITUATIONS)
+
+        # проверяем что сервер существует и мы хост
+        if is_host and server_obj:
+            for c, player in zip(server_obj.clients, server_obj.players):
+                hand = random.sample(ALL_CARDS, 5)
+                server_obj.send_json(c, {
+                    "type": "game_start",
+                    "hand": hand,
+                    "situation": situation
+                })
+
+        # Запуск локального GUI хоста
+        from modules import game_gui
+        # hand и situation для локального хоста
+        host_player_hand = random.sample(ALL_CARDS, 5)
+        game_gui.start_game_gui(game_frame, host_player_hand, situation, client_obj)
+
+
+
+
 
 
     def show_in_game():
@@ -184,24 +259,21 @@ def start_hub(user_data, network=None):
 
         room_info = network.get('room', {})
 
-        # --- Очистка фреймов ---
+        # ---------------- LEFT_FRAME ----------------
+        # Очищаем только левую панель
         for w in left_frame.winfo_children():
             w.destroy()
-        for w in game_frame.winfo_children():
-            w.destroy()
 
-        # ---------------- LEFT_FRAME ----------------
-        # --- Информация о комнате ---
+        # ---------------- Информация о комнате ----------------
         server_frame = tk.LabelFrame(left_frame, text="Сервер", bg=USER_BG, fg=FG_COLOR)
         server_frame.pack(fill="x", pady=10)
-
         tk.Label(
             server_frame,
             text=f"Название комнаты: {room_info.get('name', '—')}\nСтатус: онлайн",
             bg=USER_BG, fg=FG_COLOR
         ).pack(padx=10, pady=10)
 
-        # --- Игроки с аватарками ---
+        # ---------------- Игроки ----------------
         users_frame = tk.LabelFrame(left_frame, text="Игроки", bg=USER_BG, fg=FG_COLOR)
         users_frame.pack(fill="both", expand=True, pady=10)
 
@@ -226,7 +298,7 @@ def start_hub(user_data, network=None):
 
             tk.Label(frame, text=player_name, bg=USER_BG, fg=FG_COLOR, font=("Arial", 12)).pack(side="left", padx=5)
 
-        # --- Кнопки хоста ---
+        # ---------------- Кнопки хоста ----------------
         if is_host:
             tk.Button(left_frame, text="Начать игру",
                     bg=ACCENT_COLOR, fg=FG_COLOR, font=("Arial", 14),
@@ -237,11 +309,16 @@ def start_hub(user_data, network=None):
                 command=leave_room).pack(pady=10)
 
         # ---------------- GAME_FRAME ----------------
+        # Очищаем только верхнюю надпись/информацию, а table_frame оставляем
+        for w in game_frame.winfo_children():
+            if w != table_frame:
+                w.destroy()
+
         tk.Label(game_frame, text=f"Игровая зона\nКомната: {room_info.get('name', '—')}",
                 bg=BG_COLOR, fg=FG_COLOR, font=("Arial", 16)).pack(pady=50)
 
-
-
+        # Если стол ещё не создан, создаём его
+        init_table_frame()
 
 
 
@@ -336,6 +413,26 @@ def start_hub(user_data, network=None):
                 "players": data["players"]
             }
             refresh_hub()
+
+        elif data["type"] == "game_start":
+            from modules import game_gui
+            hand = data["hand"]
+            situation = data["situation"]
+            # запускаем GUI локально (для хоста и клиента)
+            game_gui.start_game_gui(game_frame, hand, situation, client_obj)
+
+        elif data["type"] == "player_move":
+            # другой игрок сыграл карту — отображаем на столе
+            player_name = data["player"]
+            card = data["card"]
+            add_card_to_table(player_name, card)
+            # если карта наша, убираем из руки
+            if client_obj and player_name == client_obj.name:
+                from modules import game_gui
+                if card in game_gui.player_hand:
+                    game_gui.player_hand.remove(card)
+                    game_gui.update_gui()
+
 
 
     def leave_room():

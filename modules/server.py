@@ -81,6 +81,23 @@ class RoomServer:
                 self.send_state_all()
                 break
 
+            elif msg["type"] == "player_move":
+                player = msg["player"]
+                card = msg["card"]
+                print(f"[SERVER] {player} сыграл карту: {card}")
+
+                # Рассылаем всем клиентам
+                for c in self.clients:
+                    self.send_json(c, {
+                        "type": "player_move",
+                        "player": player,
+                        "card": card
+                    })
+
+
+
+
+
         # отключение
         if player_name:
             print(f"[SERVER] {player_name} отключился")
@@ -88,8 +105,11 @@ class RoomServer:
             self.send_state_all()
         if conn in self.clients:
             self.clients.remove(conn)
-        try: conn.close()
-        except: pass
+        try:
+            conn.close()
+        except:
+            pass
+
 
     def send_state_all(self):
         state = {

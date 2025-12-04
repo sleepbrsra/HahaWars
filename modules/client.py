@@ -54,11 +54,11 @@ class RoomClient:
             msg = self.recv_json()
             if not msg:
                 break
+            # просто передаём в callback, не трогаем GUI напрямую
             if self.callback:
                 self.callback(msg)
-        self.running = False
-        try: self.sock.close()
-        except: pass
+
+
 
     def disconnect(self):
         if self.sock:
@@ -70,3 +70,20 @@ class RoomClient:
             except: pass
         self.running = False
         self.sock = None
+
+
+
+    def send_move(self, card_path):
+        """
+        Отправка сыгранной карты на сервер.
+        """
+        if not self.sock:
+            return
+        msg = {
+            "type": "player_move",
+            "player": self.name,
+            "card": card_path
+        }
+        self.send_json(msg)
+
+
