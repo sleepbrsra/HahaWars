@@ -50,7 +50,7 @@ Installation & Running
 ----------------------
 1. Clone the repository:
 
-    git clone <YOUR_REPOSITORY_URL>
+    git clone https://github.com/sleepbrsra/HahaWars
     cd HahaWars
 
 2. Install dependencies:
@@ -137,7 +137,7 @@ HahaWars — это сетевая карточная игра, где игро�
 ------------------
 1. Клонируйте репозиторий:
 
-    git clone <URL_ВАШЕГО_РЕПОЗИТОРИЯ>
+    git clone https://github.com/sleepbrsra/HahaWars
     cd HahaWars
 
 2. Установите зависимости:
